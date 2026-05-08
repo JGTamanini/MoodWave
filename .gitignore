@@ -1,0 +1,16 @@
+# ambiente virtual
+venv/
+
+# arquivos Python compilados
+__pycache__/
+*.pyc
+
+# modelo serializado (pode ser grande)
+*.pkl
+
+# arquivos de sistema
+.DS_Store
+Thumbs.db
+
+# variáveis de ambiente
+.env
