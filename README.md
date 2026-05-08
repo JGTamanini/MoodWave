@@ -62,6 +62,14 @@ Texto do usuário
 git clone https://github.com/seu-usuario/moodwave.git
 cd moodwave/backend
 
+# Crie e ative o ambiente virtual
+python -m venv venv
+
+# Windows
+venv\Scripts\activate
+# Mac/Linux
+source venv/bin/activate
+
 # Instale as dependências
 pip install -r requirements.txt
 
