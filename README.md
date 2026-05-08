@@ -42,10 +42,10 @@ Texto do usuário
 
 | Membro | Responsabilidade |
 |--------|-----------------|
-| Felipe | Camada I — PLN e Naive Bayes |
-| João | Camada II — Sistema Fuzzy Sugeno |
-| Gabriel | Camada III — Algoritmo Genético |
-| Eric | Backend FastAPI + Integração + Relatório + Frontend |
+| Felipe da Silva Chawischi | Camada I — PLN e Naive Bayes |
+| João Guilherme T. Dalmarco | Camada II — Sistema Fuzzy Sugeno |
+| Gabriel Felipe Alves Bandoch | Camada III — Algoritmo Genético |
+| Eric Gabriel Caetano | Backend FastAPI + Integração + Relatório + Frontend |
 
 ---
 
