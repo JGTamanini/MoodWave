@@ -1,0 +1,22 @@
+# ─── Cache do dataset (gerado automaticamente pelo pln.py) ───
+data/dataset_sentimentos.csv
+
+# ─── Modelos treinados (cada membro treina localmente) ────────
+*.pkl
+*.joblib
+
+# ─── Python ───────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+
+# ─── Ambientes virtuais ───────────────────────────────────────
+venv/
+.venv/
+
+# ─── IDEs ─────────────────────────────────────────────────────
+.vscode/
+.idea/
+
+# ─── Sistema operacional ──────────────────────────────────────
+.DS_Store
+Thumbs.db
