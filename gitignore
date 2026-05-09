@@ -1,5 +1,5 @@
-# ─── Dataset (cada membro baixa localmente via Kaggle API) ───
-data/
+# ─── Cache do dataset (gerado automaticamente pelo pln.py) ───
+data/dataset_sentimentos.csv
 
 # ─── Modelos treinados (cada membro treina localmente) ────────
 *.pkl
@@ -8,30 +8,14 @@ data/
 # ─── Python ───────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
-*.egg-info/
-dist/
-build/
-.eggs/
-*.egg
 
 # ─── Ambientes virtuais ───────────────────────────────────────
 venv/
 .venv/
-env/
-.env/
-
-# ─── Variáveis de ambiente e credenciais ─────────────────────
-.env
-*.env
-kaggle.json        # NUNCA suba suas credenciais do Kaggle!
-
-# ─── Jupyter Notebooks (checkpoints) ─────────────────────────
-.ipynb_checkpoints/
 
 # ─── IDEs ─────────────────────────────────────────────────────
 .vscode/
 .idea/
-*.swp
 
 # ─── Sistema operacional ──────────────────────────────────────
 .DS_Store
