@@ -1,3 +1,24 @@
+"""
+Camada II — Sistema de Inferência Fuzzy (Sugeno)
+MoodWave — Sistema de Recomendação de Músicas por Humor
+
+Interface pública:
+    fis = SistemaFuzzy()
+    resultado = fis.analisar(prob_sentimento, energia)
+    → {"score": float, "label": str}
+
+Métodos internos (disponíveis mas não necessários para integração):
+    fis.calcular_humor(prob_sentimento, energia) → float [0, 1]
+    fis.classificar(score_humor)                → str
+
+Entradas:
+    prob_sentimento : float [0, 1] — vem da Camada I (Felipe)
+    energia         : float [0, 1] — vem do Frontend (Eric) ou Camada I
+
+Saída:
+    score  : float [0, 1]
+    label  : str — "Melancólico", "Calmo", "Neutro", "Animado", "Eufórico"
+"""
 import numpy as np
 
 class SistemaFuzzy:
@@ -48,7 +69,7 @@ class SistemaFuzzy:
             "e_bai": e_bai, "e_med": e_med, "e_alt": e_alt,
         }
 
-    def inferir (self, graus):
+    def inferir(self, graus):
         # graus é o dicionário que veio do fuzzificar (return)
         return {
             "melancolico": min(graus["s_neg"], graus["e_bai"]),
@@ -70,12 +91,28 @@ class SistemaFuzzy:
             denominador += forca
         return numerador/denominador if denominador != 0 else 0
         
-
     def calcular_humor(self, prob_sentimento, energia):
         graus = self.fuzzificar(prob_sentimento, energia)
         forcas = self.inferir(graus)
         humor = self.defuzzificar(forcas)
         return humor
+
+    def classificar(self, score_humor):
+        if score_humor < 0.225:
+            return "Melancólico"
+        elif score_humor < 0.425:
+            return "Calmo"
+        elif score_humor < 0.625:
+            return "Neutro"
+        elif score_humor < 0.825:
+            return "Animado"
+        else:
+            return "Eufórico"
+    
+    def analisar(self, prob_sentimento, energia):
+        score = self.calcular_humor(prob_sentimento, energia)
+        label = self.classificar(score)
+        return {"score": score, "label": label}
 
 # teste rápido — fora da classe
 if __name__ == "__main__":
