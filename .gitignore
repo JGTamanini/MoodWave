@@ -1,12 +1,15 @@
 # ambiente virtual
 venv/
+.venv/
 
 # arquivos Python compilados
 __pycache__/
 *.pyc
+*.py[cod]
 
 # modelo serializado (pode ser grande)
 *.pkl
+*.joblib
 
 # arquivos de sistema
 .DS_Store
@@ -14,3 +17,10 @@ Thumbs.db
 
 # variáveis de ambiente
 .env
+
+# ─── Cache do dataset (gerado automaticamente pelo pln.py) ───
+data/dataset_sentimentos.csv
+
+# ─── IDEs ─────────────────────────────────────────────────────
+.vscode/
+.idea/
