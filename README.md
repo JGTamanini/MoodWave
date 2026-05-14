@@ -6,7 +6,7 @@
 
 ## 📌 Sobre o Projeto
 
-O **MoodTune** é um sistema inteligente que combina três camadas de IA para recomendar músicas com base no humor do usuário. O usuário digita uma frase livre descrevendo como está se sentindo — o sistema analisa, classifica e gera uma playlist personalizada.
+O **MoodWave** é um sistema inteligente que combina três camadas de IA para recomendar músicas com base no humor do usuário. O usuário digita uma frase livre descrevendo como está se sentindo — o sistema analisa, classifica e gera uma playlist personalizada.
 
 ---
 
@@ -82,7 +82,7 @@ A API estará disponível em `http://localhost:8000`
 ### Frontend
 
 ```bash
-cd moodtune/frontend
+cd moodwave/frontend
 
 # Instale as dependências
 npm install
