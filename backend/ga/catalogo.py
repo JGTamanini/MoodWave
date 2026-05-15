@@ -19,7 +19,7 @@ class CatalogoMusical:
         self._carregar_dados()
 
     def _carregar_dados(self):
-        """Carrega do CSV se existir, senão gera um fallback realista."""
+        """Carrega do CSV se existir, senão tenta baixar, senão gera um fallback realista."""
         if os.path.exists(self.caminho_csv):
             print(f"[Catálogo] Carregando dataset do Spotify em: {self.caminho_csv}")
             try:
@@ -30,9 +30,47 @@ class CatalogoMusical:
                 self._gerar_fallback()
         else:
             print(f"[Catálogo] Dataset não encontrado em {self.caminho_csv}.")
-            print("[Catálogo] Kaggle: https://www.kaggle.com/datasets/maharshipandya/-spotify-tracks-dataset")
-            print("[Catálogo] Gerando dataset sintético (fallback)...")
-            self._gerar_fallback()
+            if self._tentar_baixar_kaggle():
+                print("[Catálogo] Carregando o dataset recém-baixado...")
+                try:
+                    self.df = pd.read_csv(self.caminho_csv)
+                    self._limpar_e_normalizar()
+                except Exception as e:
+                    print(f"[Catálogo] Erro ao ler CSV baixado: {e}. Usando fallback.")
+                    self._gerar_fallback()
+            else:
+                print("[Catálogo] Kaggle: https://www.kaggle.com/datasets/maharshipandya/-spotify-tracks-dataset")
+                print("[Catálogo] Gerando dataset sintético (fallback)...")
+                self._gerar_fallback()
+
+    def _tentar_baixar_kaggle(self) -> bool:
+        """Tenta baixar o dataset do Kaggle via CLI (requer kaggle configurado na máquina)."""
+        print("[Catálogo] Tentando baixar dataset oficial via Kaggle CLI...")
+        try:
+            import subprocess
+            # O comando do kaggle baixa o arquivo dataset.csv e faz o unzip na pasta data
+            result = subprocess.run(
+                ["kaggle", "datasets", "download", "-d", "maharshipandya/-spotify-tracks-dataset", "--unzip", "-p", DATA_DIR],
+                capture_output=True, text=True
+            )
+            if result.returncode == 0:
+                # O Kaggle extrai com o nome original (ex: dataset.csv). Vamos encontrar e renomear
+                arquivos = os.listdir(DATA_DIR)
+                csv_baixado = next((f for f in arquivos if f.endswith('.csv') and f != os.path.basename(self.caminho_csv)), None)
+                if csv_baixado:
+                    caminho_baixado = os.path.join(DATA_DIR, csv_baixado)
+                    os.rename(caminho_baixado, self.caminho_csv)
+                print("[Catálogo] Dataset baixado e configurado com sucesso!")
+                return True
+            else:
+                print("[Catálogo] Falha no download. O Kaggle CLI está autenticado (kaggle.json)?")
+                return False
+        except FileNotFoundError:
+            print("[Catálogo] Comando 'kaggle' não encontrado. Instale com 'pip install kaggle'.")
+            return False
+        except Exception as e:
+            print(f"[Catálogo] Erro ao tentar baixar do Kaggle: {e}")
+            return False
 
     def _gerar_fallback(self, n_samples: int = 5000):
         """Gera um dataset fake mas estatisticamente realista para testes."""
