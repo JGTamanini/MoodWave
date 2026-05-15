@@ -12,13 +12,13 @@ class PlaylistGenerator:
     def __init__(self, catalogo: CatalogoMusical):
         self.catalogo = catalogo
 
-    def gerar(self, score_humor: float, tamanho_playlist: int = 10,
+    def gerar(self, target_valence: float, target_arousal: float, tamanho_playlist: int = 10,
               n_geracoes: int = 50, tamanho_populacao: int = 50) -> Dict:
         """
         Gera uma playlist utilizando o Algoritmo Genético.
         Retorna um dicionário JSON-friendly.
         """
-        evaluator = FitnessEvaluator(score_humor, self.catalogo)
+        evaluator = FitnessEvaluator(target_valence, target_arousal, self.catalogo)
         ag = AlgoritmoGenetico(evaluator, tamanho_populacao=tamanho_populacao)
         ag.tamanho_playlist = tamanho_playlist
         
@@ -38,7 +38,8 @@ class PlaylistGenerator:
             })
 
         return {
-            "score_humor_alvo": score_humor,
+            "score_valencia_alvo": target_valence,
+            "score_arousal_alvo": target_arousal,
             "fitness_alcançado": round(melhor_individuo.fitness, 4),
             "estatisticas": {
                 "energia_media": round(df_playlist["energy"].mean(), 4),

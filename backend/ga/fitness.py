@@ -10,18 +10,17 @@ class FitnessEvaluator:
     3. Suavidade de Transição (Evita saltos abruptos de energia/bpm entre faixas adjacentes)
     """
 
-    def __init__(self, score_humor: float, catalogo: CatalogoMusical,
+    def __init__(self, target_valence: float, target_arousal: float, catalogo: CatalogoMusical,
                  peso_compat: float = 0.5, peso_div: float = 0.3, peso_suav: float = 0.2):
-        self.score_humor = score_humor
         self.catalogo = catalogo
         self.peso_compat = peso_compat
         self.peso_div = peso_div
         self.peso_suav = peso_suav
         
-        # Mapeamento do score do Fuzzy (0 a 1) para features musicais alvo
-        self.target_valence = score_humor
-        self.target_energy = score_humor
-        self.target_tempo_norm = score_humor
+        # Mapeamento dos scores do Fuzzy (0 a 1) para features musicais alvo
+        self.target_valence = target_valence
+        self.target_energy = target_arousal
+        self.target_tempo_norm = target_arousal
 
     def avaliar(self, individuo: PlaylistIndividual) -> float:
         df_playlist = self.catalogo.df.iloc[individuo.cromossomo]
