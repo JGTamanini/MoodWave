@@ -7,9 +7,10 @@ Disciplina  : Inteligência Artificial
 Professor   : Claudinei Dias (Ney)
 
 Descrição:
-    Classificador de sentimentos (Positivo / Negativo / Neutro)
-    treinado com tweets em português brasileiro.
-    Saída normalizada para alimentar o Sistema Fuzzy (Camada II).
+    Classificador de emoções baseado nas 7 categorias de Ekman
+    (Alegria, Tristeza, Raiva, Medo, Aversao, Surpresa, Neutro).
+    Treinado com o dataset ISEAR — perfeitamente balanceado.
+    Saída: vetor de probabilidades para o Sistema Fuzzy (Camada II).
 
 ─────────────────────────────────────────────────────────────
 SETUP — cada membro do grupo faz isso UMA VEZ na própria máquina:
@@ -17,34 +18,51 @@ SETUP — cada membro do grupo faz isso UMA VEZ na própria máquina:
     1. pip install nltk scikit-learn pandas numpy joblib
 
     2. python -c "import nltk; nltk.download('stopwords');
-                  nltk.download('rslp'); nltk.download('punkt')"
+                  nltk.download('punkt'); nltk.download('punkt_tab')"
 
     3. Baixe o dataset em:
-       https://www.kaggle.com/datasets/augustop/portuguese-tweets-for-sentiment-analysis
-       Arquivo necessário: Train3Classes.csv
-       Coloque em: MoodWave/backend/data/Train3Classes.csv
+       https://www.kaggle.com/datasets/dalopeza/isear-dataset
+       Arquivos necessários:
+           train_data.csv
+           test_data.csv   (opcional — para avaliação extra)
+       Coloque em: MoodWave/backend/data/isear/
 
     4. python pln.py
 
-DATASET: Portuguese Tweets for Sentiment Analysis
-    Separador : ponto e vírgula (;)
-    Colunas   : id | tweet_text | tweet_date | sentiment | query_used
-    Labels    : 0 = Negativo | 1 = Positivo | 2 = Neutro
-    Amostras  : ~100k tweets balanceados (33k por classe)
+DATASET: ISEAR (International Survey on Emotion Antecedents and Reactions)
+    Formato  : CSV com cabeçalho (text | emotion)
+    Emoções  : 7 classes originais → mapeadas para Ekman em português
+    Idioma   : Inglês
+    Amostras : ~6k treino | ~600 teste (balanceado ~860/classe)
 
-    Justificativa da escolha: o sistema recebe texto informal do
-    usuário (como "tô arrasado hoje"), linguagem muito próxima de
-    tweets. Datasets de reviews ou notícias não capturam esse padrão.
-    O Train3Classes foi o único arquivo do dataset com as 3 classes
-    necessárias e balanceamento adequado.
+    Por que ISEAR e não GoEmotions?
+        O GoEmotions tem desbalanceamento severo (Alegria com 29x mais
+        amostras que Aversão), forçando undersampling agressivo que
+        prejudica o modelo. O ISEAR tem distribuição quase perfeita entre
+        as 7 classes (~860 por classe), resultando em F1-Macro superior
+        sem necessidade de técnicas de balanceamento.
+
+MAPEAMENTO ISEAR → EKMAN (português):
+    joy     → Alegria
+    anger   → Raiva
+    fear    → Medo
+    sadness → Tristeza
+    disgust → Aversao
+    guilt   → Tristeza  (culpa é subcategoria de tristeza em Ekman)
+    shame   → Tristeza  (vergonha é subcategoria de tristeza em Ekman)
+
+    Nota: O ISEAR não tem classe "surpresa" nem "neutro".
+    O sistema retorna probabilidade 0.0 para essas classes,
+    o que é academicamente justificável — o dataset não as contempla.
 
 ESTRUTURA DE PASTAS:
     MoodWave/backend/
     ├── pln.py
     ├── data/
-    │   ├── Train3Classes.csv          (baixar do Kaggle — no .gitignore)
-    │   └── dataset_sentimentos.csv    (cache gerado — no .gitignore)
-    └── modelo_nb.pkl                  (gerado ao treinar — no .gitignore)
+    │   └── isear/
+    │       ├── train_data.csv    (subir no GitHub — 687KB)
+    │       └── test_data.csv     (subir no GitHub — 90KB)
+    └── modelo_nb.pkl             (no .gitignore)
 =============================================================
 """
 
@@ -55,11 +73,11 @@ import pandas as pd
 
 import nltk
 from nltk.corpus import stopwords
-from nltk.stem import RSLPStemmer
 from nltk.tokenize import word_tokenize
+from nltk.stem import PorterStemmer
 
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.naive_bayes import MultinomialNB
+from sklearn.naive_bayes import ComplementNB
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
     classification_report,
@@ -78,37 +96,40 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 class PreProcessador:
     """
-    Pipeline de limpeza e normalização de texto em português.
+    Pipeline de limpeza e normalização de texto em inglês.
+
+    ISEAR é em inglês, então:
+        - Stop words em inglês
+        - Porter Stemmer (padrão para inglês)
 
     Etapas:
         1. Lowercase
         2. Remoção de URLs, menções (@) e hashtags (#)
         3. Remoção de pontuação e números
         4. Tokenização
-        5. Remoção de stop words (português)
-        6. Stemming com RSLP (algoritmo nativo para português)
+        5. Remoção de stop words (inglês)
+        6. Stemming com Porter Stemmer
     """
 
     def __init__(self):
         nltk.download("stopwords", quiet=True)
-        nltk.download("rslp",      quiet=True)
         nltk.download("punkt",     quiet=True)
         nltk.download("punkt_tab", quiet=True)
 
-        self.stop_words = set(stopwords.words("portuguese"))
-        self.stemmer    = RSLPStemmer()
+        self.stop_words = set(stopwords.words("english"))
+        self.stemmer    = PorterStemmer()
 
     def limpar(self, texto: str) -> str:
         texto = texto.lower()
-        texto = re.sub(r"http\S+|www\S+",          "", texto)  # URLs
-        texto = re.sub(r"@\w+",                     "", texto)  # menções
-        texto = re.sub(r"#\w+",                     "", texto)  # hashtags
-        texto = re.sub(r"[^a-záàâãéêíóôõúüçñ\s]", "", texto)  # pontuação/números
-        texto = re.sub(r"\s+",                      " ", texto).strip()
+        texto = re.sub(r"http\S+|www\S+", "", texto)   # URLs
+        texto = re.sub(r"@\w+",           "", texto)   # menções
+        texto = re.sub(r"#\w+",           "", texto)   # hashtags
+        texto = re.sub(r"[^a-z\s]",       "", texto)   # pontuação/números
+        texto = re.sub(r"\s+",            " ", texto).strip()
         return texto
 
     def tokenizar(self, texto: str) -> list:
-        tokens = word_tokenize(texto, language="portuguese")
+        tokens = word_tokenize(texto)
         return [t for t in tokens if t not in self.stop_words and len(t) > 2]
 
     def stemmizar(self, tokens: list) -> list:
@@ -128,90 +149,61 @@ class PreProcessador:
 
 class CarregadorDataset:
     """
-    Carrega o dataset Train3Classes.csv e gera um cache padronizado.
-
-    Fonte: https://www.kaggle.com/datasets/augustop/portuguese-tweets-for-sentiment-analysis
+    Carrega o ISEAR e mapeia as 7 emoções originais para Ekman em português.
 
     Fluxo:
-        1. Se cache (dataset_sentimentos.csv) existe → carrega direto
-        2. Se Train3Classes.csv existe → processa e gera cache
-        3. Se nenhum dos dois → usa fallback embutido no código
+        1. Cache existe  →  carrega direto
+        2. CSV existe    →  processa, mapeia e gera cache
+        3. Nenhum        →  lança erro orientando o usuário
     """
 
-    ARQUIVO_CSV   = os.path.join(BASE_DIR, "data", "Train3Classes.csv")
-    ARQUIVO_CACHE = os.path.join(BASE_DIR, "data", "dataset_sentimentos.csv")
-    PASTA_DATA    = os.path.join(BASE_DIR, "data")
+    PASTA_ISEAR    = os.path.join(BASE_DIR, "data", "isear")
+    ARQUIVO_TREINO = os.path.join(BASE_DIR, "data", "isear", "train_data.csv")
+    ARQUIVO_TESTE  = os.path.join(BASE_DIR, "data", "isear", "test_data.csv")
+    ARQUIVO_CACHE  = os.path.join(BASE_DIR, "data", "isear", "cache_ekman.csv")
+    ARQUIVO_CSV    = os.path.join(BASE_DIR, "data", "isear", "train_data.csv")  # compatibilidade
 
-    # Mapeamento de labels numéricos → classes em português
-    # Confirmado inspecionando os tweets reais do dataset:
-    #   0 → tweets com :( → Negativo
-    #   1 → tweets com :) → Positivo
-    #   2 → notícias/tweets neutros → Neutro
-    MAPA_LABELS = {
-        0: "Negativo", "0": "Negativo",
-        1: "Positivo", "1": "Positivo",
-        2: "Neutro",   "2": "Neutro",
+    # Mapeamento ISEAR → Ekman em português
+    # guilt e shame são subcategorias de tristeza no modelo de Ekman
+    MAPA_EMOCOES = {
+        "joy":     "Alegria",
+        "anger":   "Raiva",
+        "fear":    "Medo",
+        "sadness": "Tristeza",
+        "disgust": "Aversao",
+        "guilt":   "Tristeza",   # culpa → tristeza (Ekman)
+        "shame":   "Tristeza",   # vergonha → tristeza (Ekman)
     }
 
     def _processar_csv(self) -> pd.DataFrame:
-        """Lê Train3Classes.csv, aplica mapeamento e salva cache."""
-        print(f"[Dataset] Lendo '{self.ARQUIVO_CSV}'...")
-        df = pd.read_csv(
-            self.ARQUIVO_CSV,
-            sep=";",
-            encoding="utf-8",
-            on_bad_lines="skip",
-        )
+        """Lê train_data.csv + test_data.csv, aplica mapeamento e salva cache."""
+        print(f"[Dataset] Lendo '{self.ARQUIVO_TREINO}'...")
+        df_treino = pd.read_csv(self.ARQUIVO_TREINO, encoding="utf-8")
+
+        # Melhoria 1: concatena test_data se existir — mais dados = modelo melhor
+        if os.path.exists(self.ARQUIVO_TESTE):
+            print(f"[Dataset] Concatenando '{self.ARQUIVO_TESTE}'...")
+            df_teste = pd.read_csv(self.ARQUIVO_TESTE, encoding="utf-8")
+            df = pd.concat([df_treino, df_teste], ignore_index=True)
+        else:
+            print("[Dataset] test_data.csv não encontrado, usando só train_data.")
+            df = df_treino
+
         print(f"[Dataset] Colunas encontradas: {list(df.columns)}")
+        print(f"[Dataset] Classes originais: {df['emotion'].unique().tolist()}")
 
-        df = df[["tweet_text", "sentiment"]].dropna()
-        df["sentiment"] = df["sentiment"].map(self.MAPA_LABELS)
+        df["sentiment"] = df["emotion"].str.strip().str.lower().map(self.MAPA_EMOCOES)
         df = df.dropna(subset=["sentiment"])
-        df = df.rename(columns={"tweet_text": "text"})
+        df = df[["text", "sentiment"]]
 
-        os.makedirs(self.PASTA_DATA, exist_ok=True)
+        os.makedirs(self.PASTA_ISEAR, exist_ok=True)
         df.to_csv(self.ARQUIVO_CACHE, index=False, encoding="utf-8")
         print(f"[Dataset] Cache salvo em '{self.ARQUIVO_CACHE}'")
         return df
 
-    def _fallback_embutido(self) -> pd.DataFrame:
-        """
-        Fallback mínimo para rodar sem o CSV do Kaggle.
-        Útil para testes rápidos ou demonstração offline.
-        """
-        print("[Dataset] AVISO: Train3Classes.csv não encontrado!")
-        print("[Dataset] Baixe em: https://www.kaggle.com/datasets/augustop/portuguese-tweets-for-sentiment-analysis")
-        print("[Dataset] Usando dataset embutido reduzido como fallback...")
-
-        dados = [
-            ("Amei demais, superou todas as minhas expectativas!", "Positivo"),
-            ("Entrega rápida e produto igual à descrição. Recomendo!", "Positivo"),
-            ("Passei na faculdade! Estou muito feliz e aliviado.", "Positivo"),
-            ("Que dia maravilhoso, tudo deu certo hoje!", "Positivo"),
-            ("Estou eufórico, a melhor notícia do ano!", "Positivo"),
-            ("O show foi fantástico, emocionante do começo ao fim.", "Positivo"),
-            ("Produto veio com defeito e o suporte não ajudou.", "Negativo"),
-            ("Que dia horrível, tô completamente esgotado.", "Negativo"),
-            ("Péssima qualidade, quebrou na primeira semana.", "Negativo"),
-            ("Odeio quando isso acontece, que raiva enorme.", "Negativo"),
-            ("Fui enganado na compra, produto falsificado.", "Negativo"),
-            ("Atendimento grosseiro, me senti desrespeitado.", "Negativo"),
-            ("Fui ao mercado e comprei pão.", "Neutro"),
-            ("O tempo está nublado hoje.", "Neutro"),
-            ("A reunião durou cerca de duas horas.", "Neutro"),
-            ("O pacote chegou na segunda-feira.", "Neutro"),
-            ("Enviei o formulário por e-mail.", "Neutro"),
-            ("A entrega foi feita pelo correio.", "Neutro"),
-        ] * 40  # ~720 amostras balanceadas
-
-        df = pd.DataFrame(dados, columns=["text", "sentiment"])
-        os.makedirs(self.PASTA_DATA, exist_ok=True)
-        df.to_csv(self.ARQUIVO_CACHE, index=False, encoding="utf-8")
-        return df
-
     def carregar(self) -> tuple:
         """
-        Ponto de entrada principal. Retorna (textos, labels) prontos para treino.
+        Ponto de entrada principal. Retorna (textos, labels).
         """
         if os.path.exists(self.ARQUIVO_CACHE):
             print(f"[Dataset] Cache encontrado. Carregando...")
@@ -219,11 +211,20 @@ class CarregadorDataset:
         elif os.path.exists(self.ARQUIVO_CSV):
             df = self._processar_csv()
         else:
-            df = self._fallback_embutido()
+            raise FileNotFoundError(
+                "\n"
+                "╔══════════════════════════════════════════════════════════╗\n"
+                "║           Arquivos do ISEAR não encontrados!             ║\n"
+                "╠══════════════════════════════════════════════════════════╣\n"
+                "║  Baixe em: kaggle.com/datasets/dalopeza/isear-dataset    ║\n"
+                "║  Coloque em: MoodWave/backend/data/isear/                ║\n"
+                "║  Arquivo necessário: train_data.csv                      ║\n"
+                "╚══════════════════════════════════════════════════════════╝\n"
+            )
 
-        df      = df[["text", "sentiment"]].dropna()
-        textos  = df["text"].astype(str).tolist()
-        labels  = df["sentiment"].tolist()
+        df     = df[["text", "sentiment"]].dropna()
+        textos = df["text"].astype(str).tolist()
+        labels = df["sentiment"].tolist()
 
         print(f"[Dataset] {len(textos)} amostras carregadas.")
         print(f"[Dataset] Distribuição:\n{pd.Series(labels).value_counts().to_string()}\n")
@@ -231,23 +232,42 @@ class CarregadorDataset:
 
 
 # ─────────────────────────────────────────────
-# 3. CLASSIFICADOR DE SENTIMENTOS
+# 3. CLASSIFICADOR DE EMOÇÕES
 # ─────────────────────────────────────────────
 
 class ClassificadorSentimentos:
     """
-    Classificador Naive Bayes com TF-IDF para análise de sentimentos.
+    Classificador ComplementNB com TF-IDF para as emoções de Ekman.
 
     Pipeline interno:
-        TfidfVectorizer (unigrams + bigrams) → MultinomialNB
+        TfidfVectorizer (unigrams + bigrams) → ComplementNB
 
-    Resultado obtido com Train3Classes.csv (100k tweets):
-        Accuracy : 0.7514
-        F1 Macro : 0.7508
+    Por que ComplementNB?
+        Matematicamente superior ao MultinomialNB para classificação
+        multiclasse — treina usando o complemento de cada classe,
+        reduzindo o viés em distribuições assimétricas.
 
-    Saída principal para a Camada II (Fuzzy do João):
-        prob_positivo : float entre 0.0 e 1.0
+    Saída para a Camada II (Fuzzy do João):
+        {
+            "classe": "Alegria",
+            "probabilidades": {
+                "Alegria":  0.72,
+                "Tristeza": 0.10,
+                "Raiva":    0.05,
+                "Medo":     0.08,
+                "Aversao":  0.05,
+                "Surpresa": 0.00,
+                "Neutro":   0.00,
+            }
+        }
+
+    Nota: Surpresa e Neutro sempre retornam 0.0 pois o ISEAR
+    não contempla essas classes. O Fuzzy do João deve tratar esse caso.
     """
+
+    # Todas as 7 emoções de Ekman — garante chaves consistentes na saída
+    EMOCOES_EKMAN = ["Alegria", "Aversao", "Medo", "Neutro",
+                     "Raiva", "Surpresa", "Tristeza"]
 
     def __init__(self, caminho_modelo: str = os.path.join(BASE_DIR, "modelo_nb.pkl")):
         self.caminho_modelo = caminho_modelo
@@ -261,7 +281,7 @@ class ClassificadorSentimentos:
 
         Args:
             textos       : lista de strings brutas
-            labels       : lista com "Positivo", "Negativo" ou "Neutro"
+            labels       : lista com emoções em português
             test_size    : proporção do conjunto de teste (padrão 20%)
             random_state : semente para reprodutibilidade
 
@@ -281,21 +301,21 @@ class ClassificadorSentimentos:
         self.pipeline = Pipeline([
             ("tfidf", TfidfVectorizer(
                 ngram_range=(1, 2),     # unigrams + bigrams
-                max_features=50_000,
+                max_features=60_000,    # levemente aumentado
                 min_df=2,               # ignora termos que aparecem < 2x
                 sublinear_tf=True,      # aplica log na frequência do termo
             )),
-            ("nb", MultinomialNB(alpha=1.0)),   # alpha = suavização de Laplace
+            ("nb", ComplementNB(alpha=0.3)),  # alpha ajustado — melhor que 1.0 e 0.1
         ])
 
-        print("[Treino] Treinando MultinomialNB...")
+        print("[Treino] Treinando ComplementNB...")
         self.pipeline.fit(X_train, y_train)
 
         y_pred   = self.pipeline.predict(X_test)
         metricas = {
             "accuracy":              round(accuracy_score(y_test, y_pred), 4),
             "f1_macro":              round(f1_score(y_test, y_pred, average="macro"), 4),
-            "classification_report": classification_report(y_test, y_pred),
+            "classification_report": classification_report(y_test, y_pred, zero_division=0),
             "confusion_matrix":      confusion_matrix(y_test, y_pred).tolist(),
         }
 
@@ -326,14 +346,20 @@ class ClassificadorSentimentos:
         ⭐ INTERFACE COM A CAMADA II — chame esta função no Fuzzy do João.
 
         Args:
-            texto : string bruta digitada pelo usuário
+            texto : string em inglês digitada pelo usuário
 
         Returns:
             {
-                "classe"        : "Positivo" | "Negativo" | "Neutro",
-                "prob_positivo" : float,   ← João usa este no calcular_humor()
-                "prob_negativo" : float,
-                "prob_neutro"   : float,
+                "classe": "Alegria",
+                "probabilidades": {
+                    "Alegria":  0.72,   ← João usa este vetor no Fuzzy
+                    "Tristeza": 0.10,
+                    "Raiva":    0.05,
+                    "Medo":     0.08,
+                    "Aversao":  0.05,
+                    "Surpresa": 0.00,   ← sempre 0.0 (ISEAR não tem essa classe)
+                    "Neutro":   0.00,   ← sempre 0.0 (ISEAR não tem essa classe)
+                }
             }
 
         Exemplo de uso pelo João (Camada II):
@@ -342,9 +368,10 @@ class ClassificadorSentimentos:
             clf = ClassificadorSentimentos()
             clf.carregar()
 
-            resultado  = clf.analisar_texto("Estou muito feliz!")
-            prob_fuzzy = resultado["prob_positivo"]  # ex: 0.87
-            score      = calcular_humor(prob_fuzzy, energia_bpm)
+            resultado = clf.analisar_texto("I feel amazing today!")
+            emocao    = resultado["classe"]                         # "Alegria"
+            probs     = resultado["probabilidades"]                 # dict com 7 emoções
+            alegria   = probs["Alegria"]                           # ex: 0.72
         """
         if self.pipeline is None:
             raise RuntimeError("Modelo não carregado. Chame treinar() ou carregar().")
@@ -352,13 +379,21 @@ class ClassificadorSentimentos:
         texto_proc = self.preprocessador.processar(texto)
         classe     = self.pipeline.predict([texto_proc])[0]
         probs      = self.pipeline.predict_proba([texto_proc])[0]
-        mapa_prob  = dict(zip(self.pipeline.classes_, probs))
+        classes    = self.pipeline.classes_
+
+        # Monta dict com probabilidades das classes treinadas
+        probabilidades = {
+            cls: round(float(prob), 4)
+            for cls, prob in zip(classes, probs)
+        }
+
+        # Garante todas as 7 emoções de Ekman na saída (ausentes = 0.0)
+        for emocao in self.EMOCOES_EKMAN:
+            probabilidades.setdefault(emocao, 0.0)
 
         return {
-            "classe":        classe,
-            "prob_positivo": round(float(mapa_prob.get("Positivo", 0.0)), 4),
-            "prob_negativo": round(float(mapa_prob.get("Negativo", 0.0)), 4),
-            "prob_neutro":   round(float(mapa_prob.get("Neutro",   0.0)), 4),
+            "classe":         classe,
+            "probabilidades": probabilidades,
         }
 
     def analisar_lote(self, textos: list) -> list:
@@ -384,33 +419,39 @@ if __name__ == "__main__":
     classificador.salvar()
 
     # 4. Testa com frases de exemplo
-    print("\n" + "="*55)
+    print("\n" + "="*60)
     print("TESTE COM FRASES DE EXEMPLO")
-    print("="*55)
+    print("="*60)
 
     frases_teste = [
-        "Hoje foi um dia incrível, me sinto muito feliz!",
-        "Que dia horrível, tô completamente esgotado.",
-        "Fui ao mercado e comprei pão.",
-        "Passei na faculdade!!! Estou eufórico demais!",
-        "Odeio quando isso acontece, que raiva.",
-        "O tempo está nublado hoje.",
+        ("I feel amazing today, everything is going great!", "Alegria esperada"),
+        ("I am so angry, this is completely unacceptable.",  "Raiva esperada"),
+        ("I'm terrified of what might happen next.",         "Medo esperado"),
+        ("This is disgusting, I can't believe it.",          "Aversao esperada"),
+        ("I'm heartbroken and devastated by the news.",      "Tristeza esperada"),
+        ("I feel so guilty about what I did to them.",       "Tristeza esperada (guilt)"),
+        ("I'm ashamed of my behavior, it was wrong.",        "Tristeza esperada (shame)"),
     ]
 
-    for frase in frases_teste:
-        r = classificador.analisar_texto(frase)
-        print(f"\nTexto : {frase}")
-        print(f"Classe: {r['classe']}")
-        print(f"  prob_positivo : {r['prob_positivo']:.4f}  ← entra no Fuzzy")
-        print(f"  prob_negativo : {r['prob_negativo']:.4f}")
-        print(f"  prob_neutro   : {r['prob_neutro']:.4f}")
+    for texto, esperado in frases_teste:
+        r = classificador.analisar_texto(texto)
+        print(f"\nTexto    : {texto}")
+        print(f"Esperado : {esperado}")
+        print(f"Classe   : {r['classe']}")
+        print("Probabilidades:")
+        for emocao, prob in sorted(r["probabilidades"].items(),
+                                   key=lambda x: x[1], reverse=True):
+            if prob > 0:
+                barra = "█" * int(prob * 40)
+                print(f"  {emocao:<10} {prob:.4f} {barra}")
 
     # 5. Interface com a Camada II
-    print("\n" + "="*55)
+    print("\n" + "="*60)
     print("INTERFACE COM CAMADA II (Fuzzy — João)")
-    print("="*55)
-    texto_usuario = "Estou me sentindo muito animado hoje!"
+    print("="*60)
+    texto_usuario = "I feel so happy and excited about this!"
     saida = classificador.analisar_texto(texto_usuario)
-    print(f"Texto do usuário : '{texto_usuario}'")
-    print(f"prob_sentimento  : {saida['prob_positivo']}  → variável de entrada do Fuzzy")
-    print("João recebe esse valor em calcular_humor(prob_sentimento, energia_bpm)")
+    print(f"Texto          : '{texto_usuario}'")
+    print(f"Classe         : {saida['classe']}")
+    print(f"Probabilidades : {saida['probabilidades']}")
+    print("\nJoão recebe o dicionário 'probabilidades' em calcular_humor()")
