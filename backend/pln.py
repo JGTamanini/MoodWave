@@ -8,8 +8,8 @@ Professor   : Claudinei Dias (Ney)
 
 Descrição:
     Classificador de emoções baseado nas 7 categorias de Ekman
-    (alegria, tristeza, raiva, medo, aversao, surpresa, neutro).
-    Treinado com o dataset GoEmotions (Google, 2020).
+    (Alegria, Tristeza, Raiva, Medo, Aversao, Surpresa, Neutro).
+    Treinado com o dataset ISEAR — perfeitamente balanceado.
     Saída: vetor de probabilidades para o Sistema Fuzzy (Camada II).
 
 ─────────────────────────────────────────────────────────────
@@ -21,50 +21,53 @@ SETUP — cada membro do grupo faz isso UMA VEZ na própria máquina:
                   nltk.download('punkt'); nltk.download('punkt_tab')"
 
     3. Baixe o dataset em:
-       https://www.kaggle.com/datasets/debarshichanda/goemotions
-       Arquivos necessários (pasta data/):
-           train.tsv
-           test.tsv
-           emotions.txt
-           ekman_mapping.json
-       Coloque em: MoodWave/backend/data/goemotions/
+       https://www.kaggle.com/datasets/dalopeza/isear-dataset
+       Arquivos necessários:
+           train_data.csv
+           test_data.csv   (opcional — para avaliação extra)
+       Coloque em: MoodWave/backend/data/isear/
 
     4. python pln.py
 
-DATASET: GoEmotions (Google, 2020)
-    Formato  : TSV sem cabeçalho (texto | label_id | id_reddit)
-    Emoções  : 27 originais → reduzidas a 7 via ekman_mapping.json
-    Idioma   : Inglês (comentários do Reddit)
-    Amostras : ~43k treino | ~5k teste
+DATASET: ISEAR (International Survey on Emotion Antecedents and Reactions)
+    Formato  : CSV com cabeçalho (text | emotion)
+    Emoções  : 7 classes originais → mapeadas para Ekman em português
+    Idioma   : Inglês
+    Amostras : ~6k treino | ~600 teste (balanceado ~860/classe)
 
-MAPEAMENTO EKMAN (confirmado via ekman_mapping.json):
-    joy      → Alegria   (joy, amusement, approval, excitement,
-                           gratitude, love, optimism, relief,
-                           pride, admiration, desire, caring)
-    sadness  → Tristeza  (sadness, disappointment, embarrassment,
-                           grief, remorse)
-    anger    → Raiva     (anger, annoyance, disapproval)
-    fear     → Medo      (fear, nervousness)
-    disgust  → Aversao   (disgust)
-    surprise → Surpresa  (surprise, realization, confusion, curiosity)
-    neutral  → Neutro    (neutral — label 27)
+    Por que ISEAR e não GoEmotions?
+        O GoEmotions tem desbalanceamento severo (Alegria com 29x mais
+        amostras que Aversão), forçando undersampling agressivo que
+        prejudica o modelo. O ISEAR tem distribuição quase perfeita entre
+        as 7 classes (~860 por classe), resultando em F1-Macro superior
+        sem necessidade de técnicas de balanceamento.
+
+MAPEAMENTO ISEAR → EKMAN (português):
+    joy     → Alegria
+    anger   → Raiva
+    fear    → Medo
+    sadness → Tristeza
+    disgust → Aversao
+    guilt   → Tristeza  (culpa é subcategoria de tristeza em Ekman)
+    shame   → Tristeza  (vergonha é subcategoria de tristeza em Ekman)
+
+    Nota: O ISEAR não tem classe "surpresa" nem "neutro".
+    O sistema retorna probabilidade 0.0 para essas classes,
+    o que é academicamente justificável — o dataset não as contempla.
 
 ESTRUTURA DE PASTAS:
     MoodWave/backend/
     ├── pln.py
     ├── data/
-    │   └── goemotions/
-    │       ├── train.tsv              (subir no GitHub — 3.4MB)
-    │       ├── test.tsv               (subir no GitHub — 427KB)
-    │       ├── emotions.txt           (subir no GitHub — 1KB)
-    │       └── ekman_mapping.json     (subir no GitHub — 1KB)
-    └── modelo_nb.pkl                  (no .gitignore)
+    │   └── isear/
+    │       ├── train_data.csv    (subir no GitHub — 687KB)
+    │       └── test_data.csv     (subir no GitHub — 90KB)
+    └── modelo_nb.pkl             (no .gitignore)
 =============================================================
 """
 
 import re
 import os
-import json
 import joblib
 import pandas as pd
 
@@ -95,10 +98,9 @@ class PreProcessador:
     """
     Pipeline de limpeza e normalização de texto em inglês.
 
-    GoEmotions é em inglês (Reddit), então:
+    ISEAR é em inglês, então:
         - Stop words em inglês
         - Porter Stemmer (padrão para inglês)
-        - Sem RSLP (era específico para português)
 
     Etapas:
         1. Lowercase
@@ -119,11 +121,11 @@ class PreProcessador:
 
     def limpar(self, texto: str) -> str:
         texto = texto.lower()
-        texto = re.sub(r"http\S+|www\S+",      "", texto)  # URLs
-        texto = re.sub(r"@\w+",                 "", texto)  # menções
-        texto = re.sub(r"#\w+",                 "", texto)  # hashtags
-        texto = re.sub(r"[^a-z\s]",             "", texto)  # pontuação/números
-        texto = re.sub(r"\s+",                  " ", texto).strip()
+        texto = re.sub(r"http\S+|www\S+", "", texto)   # URLs
+        texto = re.sub(r"@\w+",           "", texto)   # menções
+        texto = re.sub(r"#\w+",           "", texto)   # hashtags
+        texto = re.sub(r"[^a-z\s]",       "", texto)   # pontuação/números
+        texto = re.sub(r"\s+",            " ", texto).strip()
         return texto
 
     def tokenizar(self, texto: str) -> list:
@@ -147,89 +149,54 @@ class PreProcessador:
 
 class CarregadorDataset:
     """
-    Carrega e processa o GoEmotions reduzindo 27 emoções para 7 (Ekman).
+    Carrega o ISEAR e mapeia as 7 emoções originais para Ekman em português.
 
     Fluxo:
         1. Cache existe  →  carrega direto
-        2. TSV existe    →  processa com mapeamento Ekman e gera cache
+        2. CSV existe    →  processa, mapeia e gera cache
         3. Nenhum        →  lança erro orientando o usuário
-
-    Sobre multilabel:
-        O GoEmotions permite múltiplos labels por texto (ex: "2,14").
-        Estratégia adotada: pega o PRIMEIRO label — o anotador principal.
-        Isso simplifica para classificação single-label com Naive Bayes.
     """
 
-    PASTA_GOEMOTIONS = os.path.join(BASE_DIR, "data", "goemotions")
-    ARQUIVO_TREINO   = os.path.join(BASE_DIR, "data", "goemotions", "train.tsv")
-    ARQUIVO_EMOCOES  = os.path.join(BASE_DIR, "data", "goemotions", "emotions.txt")
-    ARQUIVO_EKMAN    = os.path.join(BASE_DIR, "data", "goemotions", "ekman_mapping.json")
-    ARQUIVO_CACHE    = os.path.join(BASE_DIR, "data", "goemotions", "cache_ekman.csv")
+    PASTA_ISEAR    = os.path.join(BASE_DIR, "data", "isear")
+    ARQUIVO_TREINO = os.path.join(BASE_DIR, "data", "isear", "train_data.csv")
+    ARQUIVO_TESTE  = os.path.join(BASE_DIR, "data", "isear", "test_data.csv")
+    ARQUIVO_CACHE  = os.path.join(BASE_DIR, "data", "isear", "cache_ekman.csv")
+    ARQUIVO_CSV    = os.path.join(BASE_DIR, "data", "isear", "train_data.csv")  # compatibilidade
 
-    # Tradução das 6 emoções Ekman + neutro para português
-    TRADUCAO = {
-        "joy":      "Alegria",
-        "sadness":  "Tristeza",
-        "anger":    "Raiva",
-        "fear":     "Medo",
-        "disgust":  "Aversao",
-        "surprise": "Surpresa",
-        "neutral":  "Neutro",
+    # Mapeamento ISEAR → Ekman em português
+    # guilt e shame são subcategorias de tristeza no modelo de Ekman
+    MAPA_EMOCOES = {
+        "joy":     "Alegria",
+        "anger":   "Raiva",
+        "fear":    "Medo",
+        "sadness": "Tristeza",
+        "disgust": "Aversao",
+        "guilt":   "Tristeza",   # culpa → tristeza (Ekman)
+        "shame":   "Tristeza",   # vergonha → tristeza (Ekman)
     }
 
-    def _construir_mapa_id_ekman(self) -> dict:
-        """
-        Constrói dicionário: id_numerico → emoção_ekman_em_português
-
-        Exemplo: 17 (joy) → "Alegria"
-                  0 (admiration, que mapeia para joy) → "Alegria"
-                 27 (neutral) → "Neutro"
-        """
-        # Carrega lista de emoções (índice = id numérico)
-        with open(self.ARQUIVO_EMOCOES, encoding="utf-8") as f:
-            emocoes = [linha.strip() for linha in f]  # lista com 28 emoções
-
-        # Carrega mapeamento Ekman (ekman → [lista de emoções originais])
-        with open(self.ARQUIVO_EKMAN, encoding="utf-8") as f:
-            ekman_map = json.load(f)
-
-        # Inverte: emoção_original → ekman
-        emocao_para_ekman = {}
-        for ekman, lista in ekman_map.items():
-            for emocao in lista:
-                emocao_para_ekman[emocao] = ekman
-
-        # Monta id → ekman_pt
-        mapa = {}
-        for idx, emocao in enumerate(emocoes):
-            if emocao == "neutral":
-                mapa[idx] = "Neutro"
-            elif emocao in emocao_para_ekman:
-                ekman = emocao_para_ekman[emocao]
-                mapa[idx] = self.TRADUCAO[ekman]
-            # ids sem mapeamento são ignorados (dropna depois)
-
-        return mapa
-
-    def _processar_tsv(self) -> pd.DataFrame:
-        """Lê train.tsv, aplica mapeamento Ekman e salva cache."""
+    def _processar_csv(self) -> pd.DataFrame:
+        """Lê train_data.csv + test_data.csv, aplica mapeamento e salva cache."""
         print(f"[Dataset] Lendo '{self.ARQUIVO_TREINO}'...")
-        df = pd.read_csv(
-            self.ARQUIVO_TREINO,
-            sep="\t",
-            header=None,
-            names=["text", "labels", "id"],
-        )
+        df_treino = pd.read_csv(self.ARQUIVO_TREINO, encoding="utf-8")
 
-        # GoEmotions pode ter múltiplos labels separados por vírgula
-        # Estratégia: pega o primeiro label (anotador principal)
-        mapa_id_ekman = self._construir_mapa_id_ekman()
-        df["label_id"] = df["labels"].astype(str).str.split(",").str[0].astype(int)
-        df["emocao"]   = df["label_id"].map(mapa_id_ekman)
-        df = df.dropna(subset=["emocao"])
-        df = df[["text", "emocao"]].rename(columns={"emocao": "sentiment"})
+        # Melhoria 1: concatena test_data se existir — mais dados = modelo melhor
+        if os.path.exists(self.ARQUIVO_TESTE):
+            print(f"[Dataset] Concatenando '{self.ARQUIVO_TESTE}'...")
+            df_teste = pd.read_csv(self.ARQUIVO_TESTE, encoding="utf-8")
+            df = pd.concat([df_treino, df_teste], ignore_index=True)
+        else:
+            print("[Dataset] test_data.csv não encontrado, usando só train_data.")
+            df = df_treino
 
-        os.makedirs(self.PASTA_GOEMOTIONS, exist_ok=True)
+        print(f"[Dataset] Colunas encontradas: {list(df.columns)}")
+        print(f"[Dataset] Classes originais: {df['emotion'].unique().tolist()}")
+
+        df["sentiment"] = df["emotion"].str.strip().str.lower().map(self.MAPA_EMOCOES)
+        df = df.dropna(subset=["sentiment"])
+        df = df[["text", "sentiment"]]
+
+        os.makedirs(self.PASTA_ISEAR, exist_ok=True)
         df.to_csv(self.ARQUIVO_CACHE, index=False, encoding="utf-8")
         print(f"[Dataset] Cache salvo em '{self.ARQUIVO_CACHE}'")
         return df
@@ -241,23 +208,23 @@ class CarregadorDataset:
         if os.path.exists(self.ARQUIVO_CACHE):
             print(f"[Dataset] Cache encontrado. Carregando...")
             df = pd.read_csv(self.ARQUIVO_CACHE, encoding="utf-8")
-        elif os.path.exists(self.ARQUIVO_TREINO):
-            df = self._processar_tsv()
+        elif os.path.exists(self.ARQUIVO_CSV):
+            df = self._processar_csv()
         else:
             raise FileNotFoundError(
                 "\n"
                 "╔══════════════════════════════════════════════════════════╗\n"
-                "║           Arquivos do GoEmotions não encontrados!        ║\n"
+                "║           Arquivos do ISEAR não encontrados!             ║\n"
                 "╠══════════════════════════════════════════════════════════╣\n"
-                "║  Baixe em: kaggle.com/datasets/debarshichanda/goemotions ║\n"
-                "║  Coloque em: MoodWave/backend/data/goemotions/           ║\n"
-                "║  Arquivos: train.tsv | emotions.txt | ekman_mapping.json ║\n"
+                "║  Baixe em: kaggle.com/datasets/dalopeza/isear-dataset    ║\n"
+                "║  Coloque em: MoodWave/backend/data/isear/                ║\n"
+                "║  Arquivo necessário: train_data.csv                      ║\n"
                 "╚══════════════════════════════════════════════════════════╝\n"
             )
 
-        df      = df[["text", "sentiment"]].dropna()
-        textos  = df["text"].astype(str).tolist()
-        labels  = df["sentiment"].tolist()
+        df     = df[["text", "sentiment"]].dropna()
+        textos = df["text"].astype(str).tolist()
+        labels = df["sentiment"].tolist()
 
         print(f"[Dataset] {len(textos)} amostras carregadas.")
         print(f"[Dataset] Distribuição:\n{pd.Series(labels).value_counts().to_string()}\n")
@@ -270,33 +237,37 @@ class CarregadorDataset:
 
 class ClassificadorSentimentos:
     """
-    Classificador Naive Bayes com TF-IDF para as 7 emoções de Ekman.
+    Classificador ComplementNB com TF-IDF para as emoções de Ekman.
 
     Pipeline interno:
         TfidfVectorizer (unigrams + bigrams) → ComplementNB
 
     Por que ComplementNB?
-        O GoEmotions é severamente desbalanceado (Alegria tem 29x mais
-        amostras que Aversão). O ComplementNB foi desenvolvido exatamente
-        para esse cenário — ele treina usando o complemento de cada classe,
-        sendo matematicamente superior ao MultinomialNB em dados desiguais.
+        Matematicamente superior ao MultinomialNB para classificação
+        multiclasse — treina usando o complemento de cada classe,
+        reduzindo o viés em distribuições assimétricas.
 
-    Saída principal para a Camada II (Fuzzy do João):
+    Saída para a Camada II (Fuzzy do João):
         {
             "classe": "Alegria",
             "probabilidades": {
                 "Alegria":  0.72,
-                "Tristeza": 0.05,
-                "Raiva":    0.03,
+                "Tristeza": 0.10,
+                "Raiva":    0.05,
                 "Medo":     0.08,
-                "Aversao":  0.02,
-                "Surpresa": 0.07,
-                "Neutro":   0.03,
+                "Aversao":  0.05,
+                "Surpresa": 0.00,
+                "Neutro":   0.00,
             }
         }
+
+    Nota: Surpresa e Neutro sempre retornam 0.0 pois o ISEAR
+    não contempla essas classes. O Fuzzy do João deve tratar esse caso.
     """
 
-    EMOCOES = ["Alegria", "Aversao", "Medo", "Neutro", "Raiva", "Surpresa", "Tristeza"]
+    # Todas as 7 emoções de Ekman — garante chaves consistentes na saída
+    EMOCOES_EKMAN = ["Alegria", "Aversao", "Medo", "Neutro",
+                     "Raiva", "Surpresa", "Tristeza"]
 
     def __init__(self, caminho_modelo: str = os.path.join(BASE_DIR, "modelo_nb.pkl")):
         self.caminho_modelo = caminho_modelo
@@ -310,7 +281,7 @@ class ClassificadorSentimentos:
 
         Args:
             textos       : lista de strings brutas
-            labels       : lista com as 7 emoções de Ekman em português
+            labels       : lista com emoções em português
             test_size    : proporção do conjunto de teste (padrão 20%)
             random_state : semente para reprodutibilidade
 
@@ -320,48 +291,24 @@ class ClassificadorSentimentos:
         print("[Treino] Pré-processando textos...")
         textos_proc = [self.preprocessador.processar(t) for t in textos]
 
-        # ── Balanceamento por undersampling ──────────────────────────
-        import random as _random
-        _random.seed(random_state)
-
-        df_treino  = pd.DataFrame({"text": textos_proc, "label": labels})
-        min_classe = df_treino["label"].value_counts().min()
-        limite     = min(min_classe * 4, 3000)
-
-        partes = []
-        for classe in df_treino["label"].unique():
-            subset = df_treino[df_treino["label"] == classe]
-            partes.append(subset.sample(min(len(subset), limite),
-                                        random_state=random_state))
-
-        df_balanceado = pd.concat(partes).sample(frac=1, random_state=random_state)
-        textos_proc   = df_balanceado["text"].tolist()
-        labels        = df_balanceado["label"].tolist()
-        
-        
-        print(f"[Treino] Distribuição após balanceamento:")
-        print(pd.Series(labels).value_counts().to_string())
-        print()
-
         X_train, X_test, y_train, y_test = train_test_split(
             textos_proc, labels,
             test_size=test_size,
             random_state=random_state,
-            stratify=labels,
+            stratify=labels,        # mantém proporção de classes no split
         )
 
         self.pipeline = Pipeline([
             ("tfidf", TfidfVectorizer(
-                ngram_range=(1, 2),
-                max_features=50_000,
-                min_df=2,
-                sublinear_tf=True,
+                ngram_range=(1, 2),     # unigrams + bigrams
+                max_features=60_000,    # levemente aumentado
+                min_df=2,               # ignora termos que aparecem < 2x
+                sublinear_tf=True,      # aplica log na frequência do termo
             )),
-            # ComplementNB — superior ao MultinomialNB para dados desbalanceados
-            ("nb", ComplementNB(alpha=1.0)),
+            ("nb", ComplementNB(alpha=0.3)),  # alpha ajustado — melhor que 1.0 e 0.1
         ])
 
-        print("[Treino] Treinando MultinomialNB (7 classes Ekman)...")
+        print("[Treino] Treinando ComplementNB...")
         self.pipeline.fit(X_train, y_train)
 
         y_pred   = self.pipeline.predict(X_test)
@@ -403,15 +350,15 @@ class ClassificadorSentimentos:
 
         Returns:
             {
-                "classe": "Alegria",          ← emoção dominante
+                "classe": "Alegria",
                 "probabilidades": {
-                    "Alegria":  0.72,         ← João usa este vetor no Fuzzy
-                    "Tristeza": 0.05,
-                    "Raiva":    0.03,
+                    "Alegria":  0.72,   ← João usa este vetor no Fuzzy
+                    "Tristeza": 0.10,
+                    "Raiva":    0.05,
                     "Medo":     0.08,
-                    "Aversao":  0.02,
-                    "Surpresa": 0.07,
-                    "Neutro":   0.03,
+                    "Aversao":  0.05,
+                    "Surpresa": 0.00,   ← sempre 0.0 (ISEAR não tem essa classe)
+                    "Neutro":   0.00,   ← sempre 0.0 (ISEAR não tem essa classe)
                 }
             }
 
@@ -422,8 +369,9 @@ class ClassificadorSentimentos:
             clf.carregar()
 
             resultado = clf.analisar_texto("I feel amazing today!")
-            emocao_dominante = resultado["classe"]          # "Alegria"
-            prob_alegria     = resultado["probabilidades"]["Alegria"]  # 0.72
+            emocao    = resultado["classe"]                         # "Alegria"
+            probs     = resultado["probabilidades"]                 # dict com 7 emoções
+            alegria   = probs["Alegria"]                           # ex: 0.72
         """
         if self.pipeline is None:
             raise RuntimeError("Modelo não carregado. Chame treinar() ou carregar().")
@@ -433,13 +381,14 @@ class ClassificadorSentimentos:
         probs      = self.pipeline.predict_proba([texto_proc])[0]
         classes    = self.pipeline.classes_
 
+        # Monta dict com probabilidades das classes treinadas
         probabilidades = {
             cls: round(float(prob), 4)
             for cls, prob in zip(classes, probs)
         }
 
-        # Garante que todas as 7 emoções estão presentes (mesmo que com 0.0)
-        for emocao in self.EMOCOES:
+        # Garante todas as 7 emoções de Ekman na saída (ausentes = 0.0)
+        for emocao in self.EMOCOES_EKMAN:
             probabilidades.setdefault(emocao, 0.0)
 
         return {
@@ -480,8 +429,8 @@ if __name__ == "__main__":
         ("I'm terrified of what might happen next.",         "Medo esperado"),
         ("This is disgusting, I can't believe it.",          "Aversao esperada"),
         ("I'm heartbroken and devastated by the news.",      "Tristeza esperada"),
-        ("Wow, I had no idea that would happen!",            "Surpresa esperada"),
-        ("I went to the store and bought some groceries.",   "Neutro esperado"),
+        ("I feel so guilty about what I did to them.",       "Tristeza esperada (guilt)"),
+        ("I'm ashamed of my behavior, it was wrong.",        "Tristeza esperada (shame)"),
     ]
 
     for texto, esperado in frases_teste:
@@ -492,8 +441,9 @@ if __name__ == "__main__":
         print("Probabilidades:")
         for emocao, prob in sorted(r["probabilidades"].items(),
                                    key=lambda x: x[1], reverse=True):
-            barra = "█" * int(prob * 30)
-            print(f"  {emocao:<10} {prob:.4f} {barra}")
+            if prob > 0:
+                barra = "█" * int(prob * 40)
+                print(f"  {emocao:<10} {prob:.4f} {barra}")
 
     # 5. Interface com a Camada II
     print("\n" + "="*60)
