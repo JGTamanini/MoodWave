@@ -1,16 +1,22 @@
-# ambiente virtual
-venv/
+# ─── Cache do dataset (gerado automaticamente pelo pln.py) ───
+data/dataset_sentimentos.csv
 
-# arquivos Python compilados
-__pycache__/
-*.pyc
-
-# modelo serializado (pode ser grande)
+# ─── Modelos treinados (cada membro treina localmente) ────────
 *.pkl
+*.joblib
 
-# arquivos de sistema
+# ─── Python ───────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+
+# ─── Ambientes virtuais ───────────────────────────────────────
+venv/
+.venv/
+
+# ─── IDEs ─────────────────────────────────────────────────────
+.vscode/
+.idea/
+
+# ─── Sistema operacional ──────────────────────────────────────
 .DS_Store
 Thumbs.db
-
-# variáveis de ambiente
-.env
