@@ -14,3 +14,4 @@ Thumbs.db
 
 # variáveis de ambiente
 .env
+node_modules
